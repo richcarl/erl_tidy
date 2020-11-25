@@ -1,0 +1,2 @@
+erl_tidy is an automatic code cleaner for Erlang code. It was previously
+part of the syntax_tools application.

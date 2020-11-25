@@ -1,0 +1,15 @@
+			-*- html -*-
+
+	erl_tidy overview page
+
+@author Richard Carlsson <carlsson.richard@gmail.com>
+@copyright 1997-2020 Richard Carlsson
+@version {@version}
+@title erl_tidy - a code cleaner for Erlang
+
+@doc erl_tidy is a tool for cleaning up obsolete constructs in Erlang code.
+
+Example: ```erl_tidy:dir("any-erlang-source-dir", [test, old_guard_tests]).'''
+(the `test' option assures that no files are modified).
+
+See the {@link erl_tidy} module for more details.

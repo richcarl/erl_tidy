@@ -1,0 +1,9 @@
+% This is an -*- erlang -*- file.
+
+{application, erl_tidy,
+ [{description, "Erlang code cleaner"},
+  {vsn, "%VSN%"},
+  {modules, [erl_tidy]},
+  {registered,[]},
+  {applications, [kernel, stdlib]},
+  {env, []}]}.
