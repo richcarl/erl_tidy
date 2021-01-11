@@ -196,11 +196,11 @@ dir_4(File, Regexp, Env) ->
     case re:run(File, Regexp, [unicode]) of
         {match, _} ->
             Opts = [{outfile, File}, {dir, ""} | Env#dir.options],
-            case catch file(File, Opts) of
-                {'EXIT', Value} ->
-                    warn("error tidying `~ts'.~n~p", [File,Value], Opts);
-                _ ->
-                    ok
+            try file(File, Opts) of
+                _ -> ok
+            catch
+                Class:Term:Trace ->
+                    warn("error tidying `~ts'.~n~p", [File,{Class,Term,Trace}], Opts)
             end;
         nomatch ->
             ok
@@ -405,17 +405,14 @@ write_module(Tree, Name, Opts) ->
     Printer = proplists:get_value(printer, Opts),
     FD = open_output_file(File, Encoding),
     verbose("writing to file `~ts'.", [File], Opts),
-    V = (catch {ok, output(FD, Printer, Tree, Opts++Encoding)}),
-    ok = file:close(FD),
-    case V of
-        {ok, _} ->
-            File;
-        {'EXIT', R} ->
+    try output(FD, Printer, Tree, Opts++Encoding) of
+        _ -> File
+    catch
+        Class:Term:Trace ->
             error_write_file(File),
-            exit(R);
-        R ->
-            error_write_file(File),
-            throw(R)
+            erlang:raise(Class,Term,Trace)
+    after
+        ok = file:close(FD)
     end.
 
 print_module(Tree, Opts) ->
@@ -435,41 +432,36 @@ is_symlink(Name) ->
     file_type(Name, true) =:= {value, symlink}.
 
 file_type(Name, Links) ->
-    V = case Links of
+    try case Links of
             true ->
-                catch file:read_link_info(Name);
+                file:read_link_info(Name);
             false ->
-                catch file:read_file_info(Name)
-        end,
-    case V of
+                file:read_file_info(Name)
+        end of
         {ok, Env} ->
             {value, Env#file_info.type};
         {error, enoent} ->
             none;
         {error, R} ->
             error_read_file(Name),
-            exit({error, R});
-        {'EXIT', R} ->
+            exit({error, R})
+    catch
+        Class:Term:Trace ->
             error_read_file(Name),
-            exit(R);
-        R ->
-            error_read_file(Name),
-            throw(R)
+            erlang:raise(Class,Term,Trace)
     end.
 
 open_output_file(FName, Options) ->
-    case catch file:open(FName, [write]++Options) of
+    try file:open(FName, [write]++Options) of
         {ok, FD} ->
             FD;
         {error, R} ->
             error_open_output(FName),
-            exit({error, R});
-        {'EXIT', R} ->
+            exit({error, R})
+    catch
+        Class:Term:Trace ->
             error_open_output(FName),
-            exit(R);
-        R ->
-            error_open_output(FName),
-            exit(R)
+            erlang:raise(Class,Term,Trace)
     end.
 
 %% If the file exists, rename it by appending the given suffix to the
@@ -492,18 +484,16 @@ backup_file_1(Name, Opts) ->
     Suffix = proplists:get_value(backup_suffix, Opts, ""),
     Dest = filename:join(filename:dirname(Name),
                          filename:basename(Name) ++ Suffix),
-    case catch file:rename(Name, Dest) of
+    try file:rename(Name, Dest) of
         ok ->
             verbose("made backup of file `~ts'.", [Name], Opts);
         {error, R} ->
             error_backup_file(Name),
-            exit({error, R});
-        {'EXIT', R} ->
+            exit({error, R})
+    catch
+        Class:Term:Trace ->
             error_backup_file(Name),
-            exit(R);
-        R ->
-            error_backup_file(Name),
-            throw(R)
+            erlang:raise(Class,Term,Trace)
     end.
 
 %% =====================================================================
@@ -686,16 +676,11 @@ module_1(Forms, File, Opts) ->
     rewrite(Forms, erl_syntax:form_list(Fs2)).
 
 analyze_forms(Forms, File) ->
-    case catch {ok, erl_syntax_lib:analyze_forms(Forms)} of
-        {ok, L1} ->
-            L1;
-        syntax_error ->
+    try erl_syntax_lib:analyze_forms(Forms)
+    catch
+        throw:syntax_error:Trace ->
             report_error({File, 0, "syntax error."}),
-	    throw(syntax_error);
-        {'EXIT', R} ->
-            exit(R);
-        R ->
-            throw(R)
+	    erlang:raise(throw, syntax_error, Trace)
     end.
 
 -spec get_module_name([erl_syntax_lib:info_pair()], string()) -> atom().
@@ -926,12 +911,14 @@ hidden_uses_2(Tree, Used) ->
             end;
         implicit_fun ->
             F = erl_syntax:implicit_fun_name(Tree),
-            case catch {ok, erl_syntax_lib:analyze_function_name(F)} of
-                {ok, {Name, Arity} = N}
-                when is_atom(Name), is_integer(Arity) ->
+            try erl_syntax_lib:analyze_function_name(F) of
+                {Name, Arity} = N
+                  when is_atom(Name), is_integer(Arity) ->
                     ordsets:add_element(N, Used);
                 _ ->
                     Used
+            catch
+                _:_ -> Used
             end;
         _ ->
             Used
@@ -1045,13 +1032,16 @@ visit_list(Ts, Env, St0) ->
 
 visit_implicit_fun(Tree, _Env, St0) ->
     F = erl_syntax:implicit_fun_name(Tree),
-    case catch {ok, erl_syntax_lib:analyze_function_name(F)} of
-        {ok, {Name, Arity} = N}
-        when is_atom(Name), is_integer(Arity) ->
+    try erl_syntax_lib:analyze_function_name(F) of
+        {Name, Arity} = N
+          when is_atom(Name), is_integer(Arity) ->
             Used = sets:add_element(N, St0#st.used),
             {Tree, St0#st{used = Used}};
         _ ->
 	    %% symbolic funs do not count as uses of a function
+            {Tree, St0}
+    catch
+        _:_ ->
             {Tree, St0}
     end.
 
@@ -1247,8 +1237,8 @@ visit_spawn_call(_, F, Ps, As, Tree, _Env, St0) ->
 
 visit_named_fun_application(F, As, Tree, Env, St0) ->
     Name = erl_syntax:implicit_fun_name(F),
-    case catch {ok, erl_syntax_lib:analyze_function_name(Name)} of
-        {ok, {A, N}} when is_atom(A), is_integer(N), N =:= length(As) ->
+    try erl_syntax_lib:analyze_function_name(Name) of
+        {A, N} when is_atom(A), is_integer(N), N =:= length(As) ->
             case is_nonlocal({A, N}, Env) of
                 true ->
                     %% Making this a direct call would be an error.
@@ -1264,6 +1254,9 @@ visit_named_fun_application(F, As, Tree, Env, St0) ->
                                         St0#st{used = Used})
             end;
         _  ->
+            visit_application_final(F, As, Tree, St0)
+    catch
+        _:_  ->
             visit_application_final(F, As, Tree, St0)
     end.
 
@@ -1319,11 +1312,14 @@ visit_nonlocal_application(F, As, Tree, Env, St0) ->
                     visit_application_final(F, As, Tree, St0)
             end;
         module_qualifier ->
-            case catch {ok, erl_syntax_lib:analyze_function_name(F)} of
-                {ok, {M, N}} when is_atom(M), is_atom(N) ->
+            try erl_syntax_lib:analyze_function_name(F) of
+                {M, N} when is_atom(M), is_atom(N) ->
                     visit_remote_application({M, N, length(As)}, F, As,
                                              Tree, Env, St0);
                 _ ->
+                    visit_application_final(F, As, Tree, St0)
+            catch
+                _:_ ->
                     visit_application_final(F, As, Tree, St0)
             end;
         _ ->
