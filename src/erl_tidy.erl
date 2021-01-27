@@ -946,7 +946,6 @@ hidden_uses_2(Tree, Used) ->
               imports = dict:new()     :: dict:dict(atom(), atom()),
               context = normal	       :: context(),
               verbosity = 1	       :: 0 | 1 | 2,
-              quiet = false            :: boolean(),
               no_imports = false       :: boolean(),
               spawn_funs = false       :: boolean(),
               auto_list_comp = true    :: boolean(),
